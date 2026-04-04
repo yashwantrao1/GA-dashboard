@@ -224,7 +224,6 @@ export function HomeStats({
   const [metricPickerSlot, setMetricPickerSlot] = React.useState<number | null>(
     null,
   )
-  /** Empty until client mount so SSR/UTC does not skew “today” vs IST. */
   const [dateRange, setDateRange] = React.useState<{
     start: string
     end: string

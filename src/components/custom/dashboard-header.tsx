@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useMemo, useState } from "react";
 
 import type { ComparePairState } from "@/lib/compare-state";

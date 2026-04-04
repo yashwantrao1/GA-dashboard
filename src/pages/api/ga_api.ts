@@ -6,6 +6,11 @@ import {
   ALLOWED_GA_METRICS,
   DEFAULT_CARD_METRICS,
 } from "@/lib/ga-metric-catalog";
+import {
+  isSnapshotType,
+  parseSnapshotDatesFromRequest,
+  runSnapshotHandler,
+} from "@/lib/ga-snapshot-handlers";
 import { getPreviousRange } from "@/lib/previous-period";
 
 type ErrorResponse = {
@@ -189,6 +194,84 @@ export default async function handler(
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Dashboard report failed";
+      return res.status(500).json({ error: message });
+    }
+  }
+
+  /**
+   * ========================================================================
+   * REPORTS SNAPSHOT — one `type` query per card (shared propertyId).
+   * Query: ?type=<below>&propertyId=<numeric or properties/ID>
+   * Optional: &start=YYYY-MM-DD&end=YYYY-MM-DD (otherwise 28daysAgo–yesterday).
+   * Fallback property: GA_PROPERTY_ID env when propertyId omitted.
+   *
+   * snapshot_main_metric — Main card: daily series for activeUsers, newUsers,
+   *   averageSessionDuration + period totals (28d ending yesterday).
+   *
+   * snapshot_realtime — Realtime active users, optional per-minute breakdown
+   *   (minutesAgo), top countries.
+   *
+   * snapshot_insights — No BigQuery/ML; returns placeholder copy for UI.
+   *
+   * snapshot_new_users_by_channel — Horizontal bar data: newUsers ×
+   *   sessionDefaultChannelGrouping.
+   *
+   * snapshot_sessions_by_channel — Table: sessions × channel.
+   *
+   * snapshot_users_by_country — Country × activeUsers (map drawn client-side).
+   *
+   * snapshot_user_activity_over_time — Three lines (30/7/1-day windows) +
+   *   unique-user totals per window.
+   *
+   * snapshot_cohort_retention — Cohort matrix (cohort × week); empty if API
+   *   rejects cohort spec for the property.
+   *
+   * snapshot_views_by_page_title — pageTitle × screenPageViews.
+   *
+   * snapshot_event_counts — eventName × eventCount.
+   *
+   * snapshot_key_events — eventName × keyEvents (marks only).
+   *
+   * snapshot_avg_purchase_value — itemName × averagePurchaseRevenue (120d).
+   *
+   * snapshot_items_purchased — itemName × itemsPurchased.
+   *
+   * snapshot_key_events_platform — platform × keyEvents (donut / list).
+   * ========================================================================
+   */
+  if (typeof req.query.type === "string" && isSnapshotType(req.query.type)) {
+    const queryPropertyId =
+      typeof req.query.propertyId === "string"
+        ? req.query.propertyId
+        : undefined;
+    const propertyId = queryPropertyId || process.env.GA_PROPERTY_ID;
+
+    if (!propertyId) {
+      return res.status(400).json({
+        error: "Missing propertyId (query) or GA_PROPERTY_ID (env)",
+      });
+    }
+
+    const dataClient = new BetaAnalyticsDataClient({
+      credentials,
+    });
+
+    const numericPropertyId = propertyId.startsWith("properties/")
+      ? propertyId.replace("properties/", "")
+      : propertyId;
+
+    try {
+      const snapshotDates = parseSnapshotDatesFromRequest(req.query);
+      const payload = await runSnapshotHandler(
+        req.query.type,
+        dataClient,
+        numericPropertyId,
+        snapshotDates
+      );
+      return res.status(200).json(payload);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Snapshot report failed";
       return res.status(500).json({ error: message });
     }
   }
